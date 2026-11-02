@@ -37,14 +37,21 @@ app = FastAPI(
     version="1.0.0",
     description="Data-backed FMCG analytics. Missing source data and model artifacts are reported explicitly.",
 )
-allowed_origins = [
-    origin.strip()
-    for origin in os.getenv(
-        "CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173",
-    ).split(",")
-    if origin.strip()
-]
+configured_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173",
+).split(",")
+production_origins = os.getenv(
+    "PRODUCTION_CORS_ORIGINS",
+    "https://nexus-sand-five-22.vercel.app",
+).split(",")
+allowed_origins = list(
+    dict.fromkeys(
+        origin.strip()
+        for origin in [*configured_origins, *production_origins]
+        if origin.strip()
+    )
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
