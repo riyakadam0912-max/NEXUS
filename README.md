@@ -68,6 +68,9 @@ Analytics accept optional `start`, `end`, `store`, and `family` query parameters
 ## Production deployment
 
 Deploy `frontend/` to Vercel and the FastAPI app to Render. The frontend uses same-origin `/api` requests in production; `frontend/vercel.json` proxies those requests to `https://nexus-api1-3arj.onrender.com` before applying the SPA fallback. This avoids browser CORS configuration for the Vercel app. No `VITE_API_URL` setting is needed in Vercel; the production build intentionally ignores it. Keep `PRODUCTION_CORS_ORIGINS` configured on Render only if browser clients need to call the Render URL directly.
+
+Render's Free web service sleeps after inactivity, so its first request must restart the service and can take substantially longer than later requests. The API also loads and analyzes the 379,800-row SQLite dataset; sales data is cached compactly in memory, and repeated overview results are cached for common filter combinations. For consistently fast responses without cold starts, use an always-on Render instance.
+
 # LightGBM forecasting
 
 The forecast API uses the supplied native LightGBM booster and its 56-feature contract. Runtime artifacts default to the project root and can be overridden with `NEXUS_LGB_MODEL`, `NEXUS_LGB_CONFIG`, and `NEXUS_DATABASE`.

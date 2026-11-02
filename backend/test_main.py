@@ -1,9 +1,10 @@
 import sqlite3
+from datetime import date, timedelta
 
 import pandas as pd
 from fastapi.testclient import TestClient
 
-from main import DATABASE_PATH, _sales_frame, app
+from main import DATABASE_PATH, _demand_change_alerts, _sales_frame, app
 
 
 client = TestClient(app)
@@ -16,6 +17,24 @@ def test_database_sales_frame_is_compact_and_reused() -> None:
     assert pd.api.types.is_datetime64_any_dtype(frame["date"])
     assert isinstance(frame["family"].dtype, pd.CategoricalDtype)
     assert frame.memory_usage(deep=True).sum() < 50 * 1024 * 1024
+
+
+def test_demand_change_alerts_compare_recent_and_prior_group_totals() -> None:
+    latest = date(2024, 1, 28)
+    rows = []
+    for day_offset in range(28):
+        day = latest - timedelta(days=27 - day_offset)
+        for store, recent_sales in [(2, 20), (3, 10)]:
+            rows.append({
+                "date": pd.Timestamp(day),
+                "store_nbr": store,
+                "family": "BEVERAGES",
+                "unit_sales": recent_sales if day_offset >= 21 else 10,
+            })
+
+    alerts = _demand_change_alerts(pd.DataFrame(rows))
+
+    assert [(alert["store"], alert["family"]) for alert in alerts] == [("2", "BEVERAGES")]
 
 
 def test_health_reports_real_source_and_model_state() -> None:

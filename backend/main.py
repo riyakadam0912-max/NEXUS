@@ -281,15 +281,35 @@ def _demand_change_alerts(filtered: pd.DataFrame) -> list[dict[str, Any]]:
     latest = filtered.date.max().normalize()
     recent_start = latest - pd.Timedelta(days=6)
     prior_start = latest - pd.Timedelta(days=27)
-    result: list[dict[str, Any]] = []
     group_cols = [column for column in ["store_nbr", "family"] if column in filtered]
-    grouped: Any = filtered.groupby(group_cols) if group_cols else [((), filtered)]
-    for key, group in grouped:
-        recent_sales = group[group.date >= recent_start].unit_sales.sum()
-        prior_sales = group[(group.date >= prior_start) & (group.date < recent_start)].unit_sales.sum()
-        if prior_sales <= 0 or recent_sales / 7 < 1.5 * (prior_sales / 21):
-            continue
-        values = key if isinstance(key, tuple) else (key,)
+    if group_cols:
+        recent_sales = (
+            filtered.loc[filtered.date >= recent_start]
+            .groupby(group_cols, observed=True).unit_sales.sum()
+        )
+        prior_sales = (
+            filtered.loc[(filtered.date >= prior_start) & (filtered.date < recent_start)]
+            .groupby(group_cols, observed=True).unit_sales.sum()
+        )
+        totals = pd.concat(
+            [recent_sales.rename("recent"), prior_sales.rename("prior")],
+            axis=1,
+        ).fillna(0)
+        candidates = [
+            (key if isinstance(key, tuple) else (key,), row.recent, row.prior)
+            for key, row in totals.iterrows()
+            if row.prior > 0 and row.recent / 7 >= 1.5 * (row.prior / 21)
+        ]
+    else:
+        recent_total = filtered.loc[filtered.date >= recent_start, "unit_sales"].sum()
+        prior_total = filtered.loc[
+            (filtered.date >= prior_start) & (filtered.date < recent_start),
+            "unit_sales",
+        ].sum()
+        candidates = [((), recent_total, prior_total)] if prior_total > 0 and recent_total / 7 >= 1.5 * (prior_total / 21) else []
+
+    result: list[dict[str, Any]] = []
+    for values, _, _ in candidates:
         fields = dict(zip(group_cols, values))
         result.append({
             "severity": "medium",
@@ -303,6 +323,7 @@ def _demand_change_alerts(filtered: pd.DataFrame) -> list[dict[str, Any]]:
     return result
 
 
+@lru_cache(maxsize=8)
 def _overview(start: date | str | None, end: date | str | None, store: str | None, family: str | None) -> dict[str, Any]:
     raw = _sales_frame()
     if raw is None:
@@ -323,8 +344,11 @@ def _overview(start: date | str | None, end: date | str | None, store: str | Non
         for date, row in daily.iterrows()
     ]
     monthly = (
-        filtered.assign(month=filtered["date"].dt.to_period("M").astype(str))
-        .groupby("month", as_index=False)["unit_sales"].sum()
+        filtered.groupby(filtered["date"].dt.to_period("M"), observed=True)["unit_sales"]
+        .sum()
+        .rename_axis("month")
+        .reset_index()
+        .assign(month=lambda frame: frame["month"].astype(str))
         .rename(columns={"unit_sales": "sales"})
     )
     top_families = []
