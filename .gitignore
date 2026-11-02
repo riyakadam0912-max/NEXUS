@@ -1,0 +1,13 @@
+node_modules/
+frontend/node_modules/
+frontend/dist/
+backend/.venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.tsbuildinfo
+*.log
+.env
+.vscode/
+cloudflared.exe
+nexus-*-page-*.csv
