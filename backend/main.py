@@ -5,6 +5,7 @@ from datetime import date
 from math import ceil, sqrt
 import os
 import sqlite3
+from threading import RLock
 from contextlib import closing
 from pathlib import Path
 from statistics import NormalDist
@@ -21,6 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 DATABASE_PATH = BASE_DIR.parent / "FMCG_Modelling_Dataset.db"
 MAX_CSV_BYTES = 250 * 1024 * 1024
+DATABASE_READ_LOCK = RLock()
 DATASETS = {
     "sales": ("sales_daily.parquet", "sales_daily.csv", "sales.parquet"),
     "stores": ("stores.csv", "stores.parquet"),
@@ -167,7 +169,18 @@ def _read_database(dataset: str, path_string: str, modified_ns: int) -> pd.DataF
         """,
     }
     with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as connection:
-        return pd.read_sql_query(queries[dataset], connection)
+        frame = pd.read_sql_query(queries[dataset], connection)
+    if dataset == "sales":
+        frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+        frame = frame.dropna(subset=["date"])
+        for column in ("family", "city", "state", "store_type"):
+            frame[column] = frame[column].astype("category")
+        for column in (
+            "store_nbr", "has_perishable", "cluster", "is_holiday", "is_event",
+            "is_national_event", "is_regional_event", "is_local_event",
+        ):
+            frame[column] = pd.to_numeric(frame[column], downcast="integer")
+    return frame
 
 
 def load_dataset(dataset: str, required: bool = False) -> pd.DataFrame | None:
@@ -181,7 +194,8 @@ def load_dataset(dataset: str, required: bool = False) -> pd.DataFrame | None:
             )
         return None
     if path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}:
-        return _read_database(dataset, str(path), path.stat().st_mtime_ns)
+        with DATABASE_READ_LOCK:
+            return _read_database(dataset, str(path), path.stat().st_mtime_ns)
     return _read_cached(str(path), path.stat().st_mtime_ns)
 
 
@@ -189,15 +203,22 @@ def _sales_frame() -> pd.DataFrame | None:
     sales = load_dataset("sales")
     if sales is None:
         return None
-    frame = sales.copy()
+    path = _find_path("sales")
+    database_source = path is not None and path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}
+    frame = sales if database_source else sales.copy()
     if "date" not in frame or "unit_sales" not in frame:
         raise HTTPException(
             status_code=422,
             detail="Sales data must include 'date' and 'unit_sales' columns.",
         )
-    frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
-    frame["unit_sales"] = pd.to_numeric(frame["unit_sales"], errors="coerce").fillna(0)
-    frame = frame.dropna(subset=["date"])
+    if not pd.api.types.is_datetime64_any_dtype(frame["date"]):
+        frame["date"] = pd.to_datetime(frame["date"], errors="coerce")
+    if not pd.api.types.is_numeric_dtype(frame["unit_sales"]):
+        frame["unit_sales"] = pd.to_numeric(frame["unit_sales"], errors="coerce").fillna(0)
+    elif frame["unit_sales"].isna().any():
+        frame["unit_sales"] = frame["unit_sales"].fillna(0)
+    if frame["date"].isna().any():
+        frame = frame.dropna(subset=["date"])
     if "family" not in frame and "item_nbr" in frame:
         products = load_dataset("products")
         if products is not None and {"item_nbr", "family"}.issubset(products.columns):
@@ -215,11 +236,21 @@ def _filter_sales(
     if end:
         result = result[result["date"] <= pd.Timestamp(end) + pd.Timedelta(days=1) - pd.Timedelta(microseconds=1)]
     if store and "store_nbr" in result:
-        result = result[result["store_nbr"].astype(str) == store]
+        if pd.api.types.is_numeric_dtype(result["store_nbr"]):
+            try:
+                store_value = int(store)
+            except ValueError:
+                return result.iloc[0:0]
+            result = result[result["store_nbr"] == store_value]
+        else:
+            result = result[result["store_nbr"].astype(str) == store]
     if family:
         if "family" not in result:
             return result.iloc[0:0]
-        result = result[result["family"].astype(str) == family]
+        if isinstance(result["family"].dtype, pd.CategoricalDtype):
+            result = result[result["family"] == family]
+        else:
+            result = result[result["family"].astype(str) == family]
     return result
 
 

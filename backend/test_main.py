@@ -1,11 +1,21 @@
 import sqlite3
 
+import pandas as pd
 from fastapi.testclient import TestClient
 
-from main import DATABASE_PATH, app
+from main import DATABASE_PATH, _sales_frame, app
 
 
 client = TestClient(app)
+
+
+def test_database_sales_frame_is_compact_and_reused() -> None:
+    frame = _sales_frame()
+    assert frame is not None
+    assert _sales_frame() is frame
+    assert pd.api.types.is_datetime64_any_dtype(frame["date"])
+    assert isinstance(frame["family"].dtype, pd.CategoricalDtype)
+    assert frame.memory_usage(deep=True).sum() < 50 * 1024 * 1024
 
 
 def test_health_reports_real_source_and_model_state() -> None:
