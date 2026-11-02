@@ -30,7 +30,7 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL (normally `http://localhost:5173`). The Vite development server proxies `/api` requests to `http://127.0.0.1:8000`. Set `VITE_API_URL` in the frontend environment only when using a different API origin.
+Open the Vite URL (normally `http://localhost:5173`). The Vite development server proxies `/api` requests to `http://127.0.0.1:8000`. Set `VITE_API_URL` in the frontend environment only when using a different API origin during development.
 
 ## Data setup
 
@@ -64,6 +64,10 @@ The calculator uses `safety stock = z(service level) × daily demand standard de
 - `GET /api/insights`
 
 Analytics accept optional `start`, `end`, `store`, and `family` query parameters. All page navigation and API-backed data exploration are implemented. Dataset and model availability are surfaced in the interface instead of being replaced with demo metrics.
+
+## Production deployment
+
+Deploy `frontend/` to Vercel and the FastAPI app to Render. The frontend uses same-origin `/api` requests in production; `frontend/vercel.json` proxies those requests to `https://nexus-api1-3arj.onrender.com` before applying the SPA fallback. This avoids browser CORS configuration for the Vercel app. No `VITE_API_URL` setting is needed in Vercel; the production build intentionally ignores it. Keep `PRODUCTION_CORS_ORIGINS` configured on Render only if browser clients need to call the Render URL directly.
 # LightGBM forecasting
 
 The forecast API uses the supplied native LightGBM booster and its 56-feature contract. Runtime artifacts default to the project root and can be overridden with `NEXUS_LGB_MODEL`, `NEXUS_LGB_CONFIG`, and `NEXUS_DATABASE`.
@@ -85,4 +89,3 @@ npm run dev
 ```
 
 The health response reports model readiness, artifact hash, runtime version, feature/tree counts, validated horizon, and reference-prediction error. Inventory Planning accepts forecast average demand but continues to require explicit stock, lead-time, and demand-uncertainty inputs.
-

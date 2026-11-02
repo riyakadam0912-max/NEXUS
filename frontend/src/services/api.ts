@@ -1,9 +1,9 @@
 import axios from "axios";
 import type { AnalyticsResponse, ApiDataset, ForecastResponse, GlobalFilters, OverviewData } from "../types";
 
-const productionApiUrl = "https://nexus-api1-3arj.onrender.com";
+const apiBaseUrl = import.meta.env.DEV ? import.meta.env.VITE_API_URL?.trim() || "" : "";
 const client = axios.create({
-  baseURL: import.meta.env.VITE_API_URL?.trim() || productionApiUrl,
+  baseURL: apiBaseUrl,
 });
 
 function filterParams(filters: GlobalFilters) {
